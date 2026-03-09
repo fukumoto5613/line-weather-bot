@@ -1,4 +1,15 @@
 from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "LINE Weather Bot running"
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    return "OK", 200
+
 import requests
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -16,8 +27,10 @@ def umbrella_message(prob):
 
 app = Flask(__name__)
 
-CHANNEL_ACCESS_TOKEN = "+HBlUVD9Pv2dVTR6i/EYjePRk4dKwhv91mJo6xHJbD5gR4Y26sOpLZBUYq14/4h6JfGq7qRHzRkuYijfe8J4J1uJLpDBuiCxYv0SkhWD8udPdIUMq/o4Ug/kiwEUYnV4WQZJ+DukfAZNFXr5lUq06QdB04t89/1O/w1cDnyilFU="
-CHANNEL_SECRET = "65f9d8942d3f89a2ca6c5a20cf237607"
+import os
+
+CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
+CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
