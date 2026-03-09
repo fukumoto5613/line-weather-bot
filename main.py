@@ -1,20 +1,19 @@
 from flask import Flask, request
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "LINE Weather Bot running"
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    return "OK", 200
-
+import os
 import requests
+from datetime import datetime, timedelta
+
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import TextSendMessage, MessageEvent, TextMessage
-from datetime import datetime, timedelta
+
+app = Flask(__name__)
+
+CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
+CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
+
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(CHANNEL_SECRET)
 
 
 def umbrella_message(prob):
@@ -25,15 +24,14 @@ def umbrella_message(prob):
     return f"☀（{prob}%）"
 
 
-app = Flask(__name__)
+@app.route("/", methods=["GET"])
+def home():
+    return "LINE Weather Bot running", 200
 
-import os
 
-CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
-CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
-
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    return "ok", 200
 
 
 @app.route("/webhook", methods=["POST"])
@@ -42,6 +40,7 @@ def webhook():
     body = request.get_data(as_text=True)
     print("Webhook body:", body)
 
+    # 動作確認用。通常のブラウザアクセスや署名なし確認でも 200 を返す
     if not signature:
         return "OK", 200
 
@@ -57,7 +56,6 @@ def webhook():
 
 
 def get_weather():
-
     url = (
         "https://api.open-meteo.com/v1/forecast"
         "?latitude=33.5902"
@@ -84,10 +82,8 @@ def get_weather():
     for i, t in enumerate(times):
         if t == current_hour:
             now_prob = probs[i]
-
         if t == f"{today}T19:00":
             prob_19 = probs[i]
-
         if t == f"{tomorrow}T08:00":
             prob_8 = probs[i]
 
@@ -108,12 +104,13 @@ def handle_message(event):
     )
 
 
-@app.route("/send")
+@app.route("/send", methods=["GET"])
 def send_weather():
     message = get_weather()
     line_bot_api.broadcast(TextSendMessage(text=message))
-    return "sent"
+    return "sent", 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
