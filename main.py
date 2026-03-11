@@ -18,7 +18,8 @@ line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 # 重複送信防止用（Render Free の再起動でリセットされる点は許容）
-last_sent_date = None
+last_morning_sent_date = None
+last_evening_sent_date = None
 
 
 def umbrella_message(prob):
@@ -31,6 +32,10 @@ def umbrella_message(prob):
 
 def morning_message(prob):
     return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
+
+
+def evening_message(prob):
+    return f"お疲れ様だよ。いまの天気は☔（{prob}%）だ。☂持って帰れ"
 
 
 @app.route("/", methods=["GET"])
@@ -133,6 +138,15 @@ def get_morning_weather_message():
     return morning_message(current_prob)
 
 
+def get_evening_weather_message():
+    current_prob = get_current_precipitation_probability()
+    if current_prob is None:
+        return None
+    if current_prob < 10:
+        return None
+    return evening_message(current_prob)
+
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     message = get_weather()
@@ -144,7 +158,7 @@ def handle_message(event):
 
 @app.route("/send", methods=["GET"])
 def send_weather():
-    global last_sent_date
+    global last_morning_sent_date, last_evening_sent_date
 
     token = request.args.get("token", "")
     if token != SEND_TOKEN:
@@ -156,23 +170,35 @@ def send_weather():
     if now.weekday() >= 5:
         return "skip: weekend", 200
 
-    # 朝8時台だけ許可
-    if now.hour != 8:
-        return "skip: not morning hour", 200
-
     today_str = now.strftime("%Y-%m-%d")
 
-    # 同日重複送信防止
-    if last_sent_date == today_str:
-        return "skip: already sent today", 200
+    # 朝8時台
+    if now.hour == 8:
+        if last_morning_sent_date == today_str:
+            return "skip: already sent this morning", 200
 
-    message = get_morning_weather_message()
-    if message is None:
-        return "skip: no rain", 200
+        message = get_morning_weather_message()
+        if message is None:
+            return "skip: no rain this morning", 200
 
-    line_bot_api.broadcast(TextSendMessage(text=message))
-    last_sent_date = today_str
-    return "sent", 200
+        line_bot_api.broadcast(TextSendMessage(text=message))
+        last_morning_sent_date = today_str
+        return "sent: morning", 200
+
+    # 18時台
+    if now.hour == 18:
+        if last_evening_sent_date == today_str:
+            return "skip: already sent this evening", 200
+
+        message = get_evening_weather_message()
+        if message is None:
+            return "skip: no rain this evening", 200
+
+        line_bot_api.broadcast(TextSendMessage(text=message))
+        last_evening_sent_date = today_str
+        return "sent: evening", 200
+
+    return "skip: not notification hour", 200
 
 
 if __name__ == "__main__":
