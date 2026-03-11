@@ -2,6 +2,7 @@ from flask import Flask, request
 import os
 import requests
 from datetime import datetime, timedelta
+import threading
 
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -38,20 +39,24 @@ def healthz():
 def webhook():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
-    print("Webhook body:", body)
 
-    # 動作確認用。通常のブラウザアクセスや署名なし確認でも 200 を返す
+    # 署名なし確認でも200返す
     if not signature:
         return "OK", 200
 
     try:
-        handler.handle(body, signature)
+        # LINEイベント処理を別スレッドで実行
+        threading.Thread(
+            target=handler.handle,
+            args=(body, signature)
+        ).start()
+
     except InvalidSignatureError:
         return "Invalid signature", 400
     except Exception as e:
         print("Webhook error:", e)
-        return "Internal error", 500
 
+    # ★ここが重要：即200返す
     return "OK", 200
 
 
@@ -98,6 +103,7 @@ def get_weather():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     message = get_weather()
+
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=message)
