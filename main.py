@@ -17,6 +17,9 @@ SEND_TOKEN = os.environ["SEND_TOKEN"]
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
+# 重複送信防止用（Render Free の再起動でリセットされる点は許容）
+last_sent_date = None
+
 
 def umbrella_message(prob):
     if prob is None:
@@ -27,11 +30,7 @@ def umbrella_message(prob):
 
 
 def morning_message(prob):
-    if prob is None:
-        return "おはよう。今日の天気は☀（不明%）です"
-    if prob >= 10:
-        return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
-    return f"おはよう。今日の天気は☀（{prob}%）です"
+    return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
 
 
 @app.route("/", methods=["GET"])
@@ -127,6 +126,10 @@ def get_weather():
 
 def get_morning_weather_message():
     current_prob = get_current_precipitation_probability()
+    if current_prob is None:
+        return None
+    if current_prob < 10:
+        return None
     return morning_message(current_prob)
 
 
@@ -141,12 +144,34 @@ def handle_message(event):
 
 @app.route("/send", methods=["GET"])
 def send_weather():
+    global last_sent_date
+
     token = request.args.get("token", "")
     if token != SEND_TOKEN:
         return "forbidden", 403
 
+    now = datetime.now()
+
+    # 月曜=0, 日曜=6 → 土日スキップ
+    if now.weekday() >= 5:
+        return "skip: weekend", 200
+
+    # 朝8時台だけ許可
+    if now.hour != 8:
+        return "skip: not morning hour", 200
+
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 同日重複送信防止
+    if last_sent_date == today_str:
+        return "skip: already sent today", 200
+
     message = get_morning_weather_message()
+    if message is None:
+        return "skip: no rain", 200
+
     line_bot_api.broadcast(TextSendMessage(text=message))
+    last_sent_date = today_str
     return "sent", 200
 
 
