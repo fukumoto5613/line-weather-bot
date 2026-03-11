@@ -12,6 +12,7 @@ app = Flask(__name__)
 
 CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
+SEND_TOKEN = os.environ["SEND_TOKEN"]
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -23,6 +24,14 @@ def umbrella_message(prob):
     if prob >= 30:
         return f"☂要る（{prob}%）"
     return f"☀（{prob}%）"
+
+
+def morning_message(prob):
+    if prob is None:
+        return "おはよう。今日の天気は☀（不明%）です"
+    if prob >= 10:
+        return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
+    return f"おはよう。今日の天気は☀（{prob}%）です"
 
 
 @app.route("/", methods=["GET"])
@@ -40,27 +49,24 @@ def webhook():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
 
-    # 署名なし確認でも200返す
     if not signature:
         return "OK", 200
 
     try:
-        # LINEイベント処理を別スレッドで実行
         threading.Thread(
             target=handler.handle,
-            args=(body, signature)
+            args=(body, signature),
+            daemon=True
         ).start()
-
     except InvalidSignatureError:
         return "Invalid signature", 400
-    except Exception as e:
-        print("Webhook error:", e)
+    except Exception:
+        return "OK", 200
 
-    # ★ここが重要：即200返す
     return "OK", 200
 
 
-def get_weather():
+def fetch_precipitation_data():
     url = (
         "https://api.open-meteo.com/v1/forecast"
         "?latitude=33.5902"
@@ -70,10 +76,29 @@ def get_weather():
     )
 
     r = requests.get(url, timeout=10)
+    r.raise_for_status()
     data = r.json()
 
     times = data["hourly"]["time"]
     probs = data["hourly"]["precipitation_probability"]
+    return times, probs
+
+
+def get_current_precipitation_probability():
+    times, probs = fetch_precipitation_data()
+
+    now = datetime.now()
+    current_hour = now.strftime("%Y-%m-%dT%H:00")
+
+    for i, t in enumerate(times):
+        if t == current_hour:
+            return probs[i]
+
+    return None
+
+
+def get_weather():
+    times, probs = fetch_precipitation_data()
 
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
@@ -100,10 +125,14 @@ def get_weather():
     )
 
 
+def get_morning_weather_message():
+    current_prob = get_current_precipitation_probability()
+    return morning_message(current_prob)
+
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     message = get_weather()
-
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=message)
@@ -112,7 +141,11 @@ def handle_message(event):
 
 @app.route("/send", methods=["GET"])
 def send_weather():
-    message = get_weather()
+    token = request.args.get("token", "")
+    if token != SEND_TOKEN:
+        return "forbidden", 403
+
+    message = get_morning_weather_message()
     line_bot_api.broadcast(TextSendMessage(text=message))
     return "sent", 200
 
