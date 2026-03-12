@@ -1,108 +1,62 @@
 from flask import Flask, request
-import os
 import requests
-from datetime import datetime, timedelta
-import threading
-
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import TextSendMessage, MessageEvent, TextMessage
-
-app = Flask(__name__)
-
-CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
-CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
-SEND_TOKEN = os.environ["SEND_TOKEN"]
-
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
-
-# 重複送信防止用（Render Free の再起動でリセットされる点は許容）
-last_morning_sent_date = None
-last_evening_sent_date = None
+from datetime import datetime, timedelta
 
 
 def umbrella_message(prob):
     if prob is None:
-        return "☀（不明%）"
+        return "傘いらない（不明%）"
     if prob >= 30:
-        return f"☂要る（{prob}%）"
-    return f"☀（{prob}%）"
+        return f"傘持っていって（{prob}%）"
+    return f"傘いらない（{prob}%）"
 
 
-def morning_message(prob):
-    return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
+app = Flask(__name__)
 
+CHANNEL_ACCESS_TOKEN = "+HBlUVD9Pv2dVTR6i/EYjePRk4dKwhv91mJo6xHJbD5gR4Y26sOpLZBUYq14/4h6JfGq7qRHzRkuYijfe8J4J1uJLpDBuiCxYv0SkhWD8udPdIUMq/o4Ug/kiwEUYnV4WQZJ+DukfAZNFXr5lUq06QdB04t89/1O/w1cDnyilFU="
+CHANNEL_SECRET = "65f9d8942d3f89a2ca6c5a20cf237607"
 
-def evening_message(prob):
-    return f"お疲れ様だよ。いまの天気は☔（{prob}%）だ。☂持って帰れ"
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return "LINE Weather Bot running", 200
-
-
-@app.route("/healthz", methods=["GET"])
-def healthz():
-    return "ok", 200
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(CHANNEL_SECRET)
 
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
+    print("Webhook body:", body)
 
     if not signature:
         return "OK", 200
 
     try:
-        threading.Thread(
-            target=handler.handle,
-            args=(body, signature),
-            daemon=True
-        ).start()
+        handler.handle(body, signature)
     except InvalidSignatureError:
         return "Invalid signature", 400
-    except Exception:
-        return "OK", 200
+    except Exception as e:
+        print("Webhook error:", e)
+        return "Internal error", 500
 
     return "OK", 200
 
 
-def fetch_precipitation_data():
+def get_weather():
     url = (
         "https://api.open-meteo.com/v1/forecast"
-        "?latitude=33.5902"
-        "&longitude=130.4017"
+        "?latitude=33.59"
+        "&longitude=130.40"
         "&hourly=precipitation_probability"
         "&timezone=Asia%2FTokyo"
     )
 
     r = requests.get(url, timeout=10)
-    r.raise_for_status()
     data = r.json()
 
     times = data["hourly"]["time"]
     probs = data["hourly"]["precipitation_probability"]
-    return times, probs
-
-
-def get_current_precipitation_probability():
-    times, probs = fetch_precipitation_data()
-
-    now = datetime.now()
-    current_hour = now.strftime("%Y-%m-%dT%H:00")
-
-    for i, t in enumerate(times):
-        if t == current_hour:
-            return probs[i]
-
-    return None
-
-
-def get_weather():
-    times, probs = fetch_precipitation_data()
 
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
@@ -122,29 +76,10 @@ def get_weather():
             prob_8 = probs[i]
 
     return (
-        f"中央区の天気\n"
-        f"いま：{umbrella_message(now_prob)}\n"
+        f"現在：{umbrella_message(now_prob)}\n"
         f"帰り：{umbrella_message(prob_19)}\n"
         f"明日：{umbrella_message(prob_8)}"
     )
-
-
-def get_morning_weather_message():
-    current_prob = get_current_precipitation_probability()
-    if current_prob is None:
-        return None
-    if current_prob < 10:
-        return None
-    return morning_message(current_prob)
-
-
-def get_evening_weather_message():
-    current_prob = get_current_precipitation_probability()
-    if current_prob is None:
-        return None
-    if current_prob < 10:
-        return None
-    return evening_message(current_prob)
 
 
 @handler.add(MessageEvent, message=TextMessage)
@@ -156,51 +91,12 @@ def handle_message(event):
     )
 
 
-@app.route("/send", methods=["GET"])
+@app.route("/send")
 def send_weather():
-    global last_morning_sent_date, last_evening_sent_date
-
-    token = request.args.get("token", "")
-    if token != SEND_TOKEN:
-        return "forbidden", 403
-
-    now = datetime.now()
-
-    # 月曜=0, 日曜=6 → 土日スキップ
-    if now.weekday() >= 5:
-        return "skip: weekend", 200
-
-    today_str = now.strftime("%Y-%m-%d")
-
-    # 朝8時台
-    if now.hour == 8:
-        if last_morning_sent_date == today_str:
-            return "skip: already sent this morning", 200
-
-        message = get_morning_weather_message()
-        if message is None:
-            return "skip: no rain this morning", 200
-
-        line_bot_api.broadcast(TextSendMessage(text=message))
-        last_morning_sent_date = today_str
-        return "sent: morning", 200
-
-    # 18時台
-    if now.hour == 18:
-        if last_evening_sent_date == today_str:
-            return "skip: already sent this evening", 200
-
-        message = get_evening_weather_message()
-        if message is None:
-            return "skip: no rain this evening", 200
-
-        line_bot_api.broadcast(TextSendMessage(text=message))
-        last_evening_sent_date = today_str
-        return "sent: evening", 200
-
-    return "skip: not notification hour", 200
+    message = get_weather()
+    line_bot_api.broadcast(TextSendMessage(text=message))
+    return "sent"
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
