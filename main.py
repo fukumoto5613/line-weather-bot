@@ -15,7 +15,7 @@ CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
 SEND_TOKEN = os.environ["SEND_TOKEN"]
 TEST_USER_ID = os.environ["TEST_USER_ID"]
-APP_VERSION = os.environ.get("APP_VERSION", "2026-03-15-1")
+APP_VERSION = os.environ.get("APP_VERSION", "2026-03-15-2")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -173,11 +173,6 @@ def send_weather():
         return "forbidden", 403
 
     now = datetime.now(JST)
-
-    # 月曜=0, 日曜=6 → 土日スキップ
-    if now.weekday() >= 5:
-        return "skip: weekend", 200
-
     today_str = now.strftime("%Y-%m-%d")
 
     # 朝8時台
