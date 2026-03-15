@@ -14,7 +14,6 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
 SEND_TOKEN = os.environ["SEND_TOKEN"]
-TEST_USER_ID = os.environ["TEST_USER_ID"]
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -39,10 +38,6 @@ def morning_message(prob):
 
 def evening_message(prob):
     return f"お疲れ様だよ。いまの天気は☔（{prob}%）だ。☂持って帰れ"
-
-
-def send_notification(text):
-    line_bot_api.push_message(TEST_USER_ID, TextSendMessage(text=text))
 
 
 @app.route("/", methods=["GET"])
@@ -178,9 +173,9 @@ def send_weather():
         if message is None:
             return "skip: no rain this morning", 200
 
-        send_notification(message)
+        line_bot_api.broadcast(TextSendMessage(text=message))
         last_morning_sent_date = today_str
-        return "sent: morning to TEST_USER_ID", 200
+        return "sent: morning", 200
 
     # 18時台
     if now.hour == 18:
@@ -191,9 +186,9 @@ def send_weather():
         if message is None:
             return "skip: no rain this evening", 200
 
-        send_notification(message)
+        line_bot_api.broadcast(TextSendMessage(text=message))
         last_evening_sent_date = today_str
-        return "sent: evening to TEST_USER_ID", 200
+        return "sent: evening", 200
 
     return "skip: not notification hour", 200
 
