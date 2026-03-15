@@ -15,6 +15,7 @@ CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
 SEND_TOKEN = os.environ["SEND_TOKEN"]
 TEST_USER_ID = os.environ["TEST_USER_ID"]
+APP_VERSION = os.environ.get("APP_VERSION", "2026-03-15-1")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -34,11 +35,19 @@ def umbrella_message(prob):
 
 
 def morning_message(prob):
-    return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
+    if prob is None:
+        return "おはよう。今日の天気は不明だ。あとでまた確認してくれ"
+    if prob >= 10:
+        return f"おはよう。今日の天気は☔（{prob}%）だ。☂持ってこい"
+    return f"おはよう。今日の天気は☀（{prob}%）だ。今日は傘はなくてよさそうだ"
 
 
 def evening_message(prob):
-    return f"お疲れ様だよ。いまの天気は☔（{prob}%）だ。☂持って帰れ"
+    if prob is None:
+        return "お疲れ様だよ。いまの天気は不明だ。あとでまた確認してくれ"
+    if prob >= 10:
+        return f"お疲れ様だよ。いまの天気は☔（{prob}%）だ。☂持って帰れ"
+    return f"お疲れ様だよ。いまの天気は☀（{prob}%）だ。帰りは傘なしで大丈夫そうだ"
 
 
 def send_notification(text):
@@ -47,12 +56,17 @@ def send_notification(text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "LINE Weather Bot running", 200
+    return f"LINE Weather Bot running / version={APP_VERSION}", 200
 
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    return "ok", 200
+    return f"ok / version={APP_VERSION}", 200
+
+
+@app.route("/version", methods=["GET"])
+def version():
+    return {"app": "line-weather-bot", "version": APP_VERSION}, 200
 
 
 @app.route("/webhook", methods=["POST"])
@@ -116,6 +130,7 @@ def get_weather():
 
     return (
         f"中央区の天気\n"
+        f"version：{APP_VERSION}\n"
         f"いま：{umbrella_message(now_prob)}\n"
         f"帰り：{umbrella_message(prob_19)}\n"
         f"明日：{umbrella_message(prob_8)}"
@@ -124,19 +139,12 @@ def get_weather():
 
 def get_morning_weather_message():
     current_prob = get_current_precipitation_probability()
-    if current_prob is None:
-        return None
-    if current_prob < 10:
-        return None
     return morning_message(current_prob)
+
 
 
 def get_evening_weather_message():
     current_prob = get_current_precipitation_probability()
-    if current_prob is None:
-        return None
-    if current_prob < 10:
-        return None
     return evening_message(current_prob)
 
 
@@ -145,7 +153,10 @@ def handle_message(event):
     try:
         message = get_weather()
     except Exception:
-        message = "天気の取得に失敗しました。少ししてからもう一度試してください。"
+        message = (
+            f"天気の取得に失敗しました。少ししてからもう一度試してください。\n"
+            f"version：{APP_VERSION}"
+        )
 
     line_bot_api.reply_message(
         event.reply_token,
@@ -175,12 +186,9 @@ def send_weather():
             return "skip: already sent this morning", 200
 
         message = get_morning_weather_message()
-        if message is None:
-            return "skip: no rain this morning", 200
-
         send_notification(message)
         last_morning_sent_date = today_str
-        return "sent: morning to TEST_USER_ID", 200
+        return f"sent: morning to TEST_USER_ID / version={APP_VERSION}", 200
 
     # 18時台
     if now.hour == 18:
@@ -188,14 +196,11 @@ def send_weather():
             return "skip: already sent this evening", 200
 
         message = get_evening_weather_message()
-        if message is None:
-            return "skip: no rain this evening", 200
-
         send_notification(message)
         last_evening_sent_date = today_str
-        return "sent: evening to TEST_USER_ID", 200
+        return f"sent: evening to TEST_USER_ID / version={APP_VERSION}", 200
 
-    return "skip: not notification hour", 200
+    return f"skip: not notification hour / version={APP_VERSION}", 200
 
 
 if __name__ == "__main__":
