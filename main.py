@@ -21,7 +21,7 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ["CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["CHANNEL_SECRET"]
 SEND_TOKEN = os.environ["SEND_TOKEN"]
-APP_VERSION = os.environ.get("APP_VERSION", "2026-03-18-5")
+APP_VERSION = os.environ.get("APP_VERSION", "2026-04-12-1")
 
 JST = ZoneInfo("Asia/Tokyo")
 LATITUDE = 33.5902
@@ -29,7 +29,8 @@ LONGITUDE = 130.4017
 OPEN_METEO_TIMEOUT_SECONDS = 10
 FORECAST_CACHE_SECONDS = 300
 
-MORNING_NOTIFICATION_HOUR = 8
+MORNING_NOTIFICATION_HOUR = 7
+MORNING_NOTIFICATION_START_MINUTE = 30
 EVENING_NOTIFICATION_HOUR = 18
 MORNING_CURRENT_RAIN_THRESHOLD = 50
 MORNING_RETURN_RAIN_THRESHOLD = 10
@@ -71,6 +72,7 @@ class NotificationWindow:
     hour: int
     last_sent_key: str
     build_message: Callable[[ForecastSnapshot], Optional[str]]
+    start_minute: int = 0
 
 
 # =========================
@@ -216,14 +218,24 @@ def mark_as_sent(window_key: str, today_str: str) -> None:
         _last_sent_dates[window_key] = today_str
 
 
+def is_weekend(now: datetime) -> bool:
+    return now.weekday() >= 5
+
+
 def process_notification_window(
     window: NotificationWindow,
     now: datetime,
 ) -> tuple[str, int]:
     today_str = now.strftime("%Y-%m-%d")
 
+    if is_weekend(now):
+        return f"skip: weekend / version={APP_VERSION}", 200
+
     if now.hour != window.hour:
         return f"skip: not {window.name} notification hour / version={APP_VERSION}", 200
+
+    if now.minute < window.start_minute:
+        return f"skip: before {window.name} notification minute / version={APP_VERSION}", 200
 
     if is_already_sent(window.last_sent_key, today_str):
         return f"skip: already sent this {window.name}", 200
@@ -247,6 +259,7 @@ def process_notification_window(
 MORNING_WINDOW = NotificationWindow(
     name="morning",
     hour=MORNING_NOTIFICATION_HOUR,
+    start_minute=MORNING_NOTIFICATION_START_MINUTE,
     last_sent_key="morning",
     build_message=build_morning_alert_message,
 )
